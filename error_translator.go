@@ -1,4 +1,4 @@
-package mysql
+package ibmdb
 
 import (
 	"github.com/go-sql-driver/mysql"

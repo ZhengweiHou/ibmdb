@@ -1,4 +1,4 @@
-module gorm.io/driver/mysql
+module gorm.io/driver/ibmdb
 
 go 1.18
 
