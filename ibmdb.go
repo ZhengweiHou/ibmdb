@@ -1,7 +1,14 @@
+// Package ibmdb 实现了GORM与IBM DB2数据库的集成
+// 提供了数据库连接、SQL生成、数据类型映射、事务管理等功能
+// 主要包含以下功能：
+// 1. 数据库连接配置
+// 2. SQL语句构建
+// 3. 数据类型转换
+// 4. 事务管理
+// 5. 数据库迁移支持
 package ibmdb
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"math"
@@ -10,28 +17,25 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-sql-driver/mysql"
-
 	"gorm.io/gorm"
 	"gorm.io/gorm/callbacks"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 	"gorm.io/gorm/migrator"
 	"gorm.io/gorm/schema"
-	"gorm.io/gorm/utils"
 )
 
 const (
-	DefaultDriverName = "mysql"
+	DefaultDriverName = "go_ibm_db"
 
 	AutoRandomTag = "auto_random()" // Treated as an auto_random field for tidb
 )
 
 type Config struct {
-	DriverName                    string
-	ServerVersion                 string
-	DSN                           string
-	DSNConfig                     *mysql.Config
+	DriverName    string
+	ServerVersion string
+	DSN           string
+	//NConfig                     *mysql.Config
 	Conn                          gorm.ConnPool
 	SkipInitializeWithVersion     bool
 	DefaultStringSize             uint
@@ -66,26 +70,48 @@ var (
 	defaultDatetimePrecision = 3
 )
 
+// Open 通过DSN字符串创建Dialector实例
+// 参数：
+//   - dsn: 数据库连接字符串
+//
+// 返回：
+//   - 实现了gorm.Dialector接口的对象
 func Open(dsn string) gorm.Dialector {
-	dsnConf, _ := mysql.ParseDSN(dsn)
-	return &Dialector{Config: &Config{DSN: dsn, DSNConfig: dsnConf}}
+	//	dsnConf, _ := mysql.ParseDSN(dsn)
+	//return &Dialector{Config: &Config{DSN: dsn, DSNConfig: dsnConf}}
+	return &Dialector{Config: &Config{DSN: dsn, SkipInitializeWithVersion: true}}
 }
 
+// New 通过配置对象创建Dialector实例
+// 参数：
+//   - config: 数据库配置对象
+//
+// 返回：
+//   - 实现了gorm.Dialector接口的对象
 func New(config Config) gorm.Dialector {
-	switch {
-	case config.DSN == "" && config.DSNConfig != nil:
-		config.DSN = config.DSNConfig.FormatDSN()
-	case config.DSN != "" && config.DSNConfig == nil:
-		config.DSNConfig, _ = mysql.ParseDSN(config.DSN)
-	}
+	//switch {
+	//case config.DSN == "" && config.DSNConfig != nil:
+	//	config.DSN = config.DSNConfig.FormatDSN()
+	//case config.DSN != "" && config.DSNConfig == nil:
+	//	config.DSNConfig, _ = mysql.ParseDSN(config.DSN)
+	//}
 	return &Dialector{Config: &config}
 }
 
+// Name 返回驱动名称
+// 返回：
+//   - 驱动名称字符串 "go_ibm_db"
 func (dialector Dialector) Name() string {
 	return DefaultDriverName
 }
 
 // NowFunc return now func
+// NowFunc 返回时间处理函数
+// 参数：
+//   - n: 时间精度
+//
+// 返回：
+//   - 时间处理函数
 func (dialector Dialector) NowFunc(n int) func() time.Time {
 	return func() time.Time {
 		round := time.Second / time.Duration(math.Pow10(n))
@@ -93,6 +119,12 @@ func (dialector Dialector) NowFunc(n int) func() time.Time {
 	}
 }
 
+// Apply 应用配置到GORM
+// 参数：
+//   - config: GORM配置对象
+//
+// 返回：
+//   - 错误信息
 func (dialector Dialector) Apply(config *gorm.Config) error {
 	if config.NowFunc != nil {
 		return nil
@@ -107,6 +139,12 @@ func (dialector Dialector) Apply(config *gorm.Config) error {
 	return nil
 }
 
+// Initialize 初始化数据库连接
+// 参数：
+//   - db: GORM数据库实例
+//
+// 返回：
+//   - 错误信息
 func (dialector Dialector) Initialize(db *gorm.DB) (err error) {
 	if dialector.DriverName == "" {
 		dialector.DriverName = DefaultDriverName
@@ -125,40 +163,40 @@ func (dialector Dialector) Initialize(db *gorm.DB) (err error) {
 		}
 	}
 
-	withReturning := false
-	if !dialector.Config.SkipInitializeWithVersion {
-		err = db.ConnPool.QueryRowContext(context.Background(), "SELECT VERSION()").Scan(&dialector.ServerVersion)
-		if err != nil {
-			return err
-		}
-
-		if strings.Contains(dialector.ServerVersion, "MariaDB") {
-			dialector.Config.DontSupportRenameIndex = true
-			dialector.Config.DontSupportRenameColumn = true
-			dialector.Config.DontSupportForShareClause = true
-			dialector.Config.DontSupportNullAsDefaultValue = true
-			withReturning = checkVersion(dialector.ServerVersion, "10.5")
-		} else if strings.HasPrefix(dialector.ServerVersion, "5.6.") {
-			dialector.Config.DontSupportRenameIndex = true
-			dialector.Config.DontSupportRenameColumn = true
-			dialector.Config.DontSupportForShareClause = true
-			dialector.Config.DontSupportDropConstraint = true
-		} else if strings.HasPrefix(dialector.ServerVersion, "5.7.") {
-			dialector.Config.DontSupportRenameColumn = true
-			dialector.Config.DontSupportForShareClause = true
-			dialector.Config.DontSupportDropConstraint = true
-		} else if strings.HasPrefix(dialector.ServerVersion, "5.") {
-			dialector.Config.DisableDatetimePrecision = true
-			dialector.Config.DontSupportRenameIndex = true
-			dialector.Config.DontSupportRenameColumn = true
-			dialector.Config.DontSupportForShareClause = true
-			dialector.Config.DontSupportDropConstraint = true
-		}
-
-		if strings.Contains(dialector.ServerVersion, "TiDB") {
-			dialector.Config.DontSupportRenameColumnUnique = true
-		}
-	}
+	//	withReturning := false
+	//	if !dialector.Config.SkipInitializeWithVersion {
+	//		//		err = db.ConnPool.QueryRowContext(context.Background(), "SELECT VERSION()").Scan(&dialector.ServerVersion)
+	//		//		if err != nil {
+	//		//			return err
+	//		//		}
+	//
+	//		if strings.Contains(dialector.ServerVersion, "MariaDB") {
+	//			dialector.Config.DontSupportRenameIndex = true
+	//			dialector.Config.DontSupportRenameColumn = true
+	//			dialector.Config.DontSupportForShareClause = true
+	//			dialector.Config.DontSupportNullAsDefaultValue = true
+	//			withReturning = checkVersion(dialector.ServerVersion, "10.5")
+	//		} else if strings.HasPrefix(dialector.ServerVersion, "5.6.") {
+	//			dialector.Config.DontSupportRenameIndex = true
+	//			dialector.Config.DontSupportRenameColumn = true
+	//			dialector.Config.DontSupportForShareClause = true
+	//			dialector.Config.DontSupportDropConstraint = true
+	//		} else if strings.HasPrefix(dialector.ServerVersion, "5.7.") {
+	//			dialector.Config.DontSupportRenameColumn = true
+	//			dialector.Config.DontSupportForShareClause = true
+	//			dialector.Config.DontSupportDropConstraint = true
+	//		} else if strings.HasPrefix(dialector.ServerVersion, "5.") {
+	//			dialector.Config.DisableDatetimePrecision = true
+	//			dialector.Config.DontSupportRenameIndex = true
+	//			dialector.Config.DontSupportRenameColumn = true
+	//			dialector.Config.DontSupportForShareClause = true
+	//			dialector.Config.DontSupportDropConstraint = true
+	//		}
+	//
+	//		if strings.Contains(dialector.ServerVersion, "TiDB") {
+	//			dialector.Config.DontSupportRenameColumnUnique = true
+	//		}
+	//	}
 
 	// register callbacks
 	callbackConfig := &callbacks.Config{
@@ -168,21 +206,25 @@ func (dialector Dialector) Initialize(db *gorm.DB) (err error) {
 		DeleteClauses: DeleteClauses,
 	}
 
-	if !dialector.Config.DisableWithReturning && withReturning {
-		if !utils.Contains(callbackConfig.CreateClauses, "RETURNING") {
-			callbackConfig.CreateClauses = append(callbackConfig.CreateClauses, "RETURNING")
-		}
-
-		if !utils.Contains(callbackConfig.UpdateClauses, "RETURNING") {
-			callbackConfig.UpdateClauses = append(callbackConfig.UpdateClauses, "RETURNING")
-		}
-
-		if !utils.Contains(callbackConfig.DeleteClauses, "RETURNING") {
-			callbackConfig.DeleteClauses = append(callbackConfig.DeleteClauses, "RETURNING")
-		}
-	}
+	//	if !dialector.Config.DisableWithReturning && withReturning {
+	//		if !utils.Contains(callbackConfig.CreateClauses, "RETURNING") {
+	//			callbackConfig.CreateClauses = append(callbackConfig.CreateClauses, "RETURNING")
+	//		}
+	//
+	//		if !utils.Contains(callbackConfig.UpdateClauses, "RETURNING") {
+	//			callbackConfig.UpdateClauses = append(callbackConfig.UpdateClauses, "RETURNING")
+	//		}
+	//
+	//		if !utils.Contains(callbackConfig.DeleteClauses, "RETURNING") {
+	//			callbackConfig.DeleteClauses = append(callbackConfig.DeleteClauses, "RETURNING")
+	//		}
+	//	}
 
 	callbacks.RegisterDefaultCallbacks(db, callbackConfig)
+	createCallback := db.Callback().Create()
+
+	// 替换create函数实现
+	createCallback.Replace("gorm:create", Create(callbackConfig))
 
 	for k, v := range dialector.ClauseBuilders() {
 		db.ClauseBuilders[k] = v
@@ -199,6 +241,9 @@ const (
 	ClauseFor = "FOR"
 )
 
+// ClauseBuilders 返回SQL子句构建器
+// 返回：
+//   - 包含各种SQL子句构建器的map
 func (dialector Dialector) ClauseBuilders() map[string]clause.ClauseBuilder {
 	clauseBuilders := map[string]clause.ClauseBuilder{
 		ClauseOnConflict: func(c clause.Clause, builder clause.Builder) {
@@ -267,10 +312,22 @@ func (dialector Dialector) ClauseBuilders() map[string]clause.ClauseBuilder {
 	return clauseBuilders
 }
 
+// DefaultValueOf 处理字段默认值
+// 参数：
+//   - field: 字段schema信息
+//
+// 返回：
+//   - SQL表达式
 func (dialector Dialector) DefaultValueOf(field *schema.Field) clause.Expression {
 	return clause.Expr{SQL: "DEFAULT"}
 }
 
+// Migrator 返回数据库迁移器
+// 参数：
+//   - db: GORM数据库实例
+//
+// 返回：
+//   - 实现了gorm.Migrator接口的对象
 func (dialector Dialector) Migrator(db *gorm.DB) gorm.Migrator {
 	return Migrator{
 		Migrator: migrator.Migrator{
@@ -283,78 +340,102 @@ func (dialector Dialector) Migrator(db *gorm.DB) gorm.Migrator {
 	}
 }
 
+// BindVarTo 处理SQL参数绑定
+// 参数：
+//   - writer: SQL语句构建器
+//   - stmt: GORM语句对象
+//   - v: 参数值
 func (dialector Dialector) BindVarTo(writer clause.Writer, stmt *gorm.Statement, v interface{}) {
 	writer.WriteByte('?')
 }
 
+// QuoteTo 处理SQL标识符引用
+// 参数：
+//   - writer: SQL语句构建器
+//   - str: 需要引用的字符串
 func (dialector Dialector) QuoteTo(writer clause.Writer, str string) {
-	var (
-		underQuoted, selfQuoted bool
-		continuousBacktick      int8
-		shiftDelimiter          int8
-	)
+	// db2 does not support backticks
+	writer.WriteString(str)
+	//var (
+	//	underQuoted, selfQuoted bool
+	//	continuousBacktick      int8
+	//	shiftDelimiter          int8
+	//)
 
-	for _, v := range []byte(str) {
-		switch v {
-		case '`':
-			continuousBacktick++
-			if continuousBacktick == 2 {
-				writer.WriteString("``")
-				continuousBacktick = 0
-			}
-		case '.':
-			if continuousBacktick > 0 || !selfQuoted {
-				shiftDelimiter = 0
-				underQuoted = false
-				continuousBacktick = 0
-				writer.WriteByte('`')
-			}
-			writer.WriteByte(v)
-			continue
-		default:
-			if shiftDelimiter-continuousBacktick <= 0 && !underQuoted {
-				writer.WriteByte('`')
-				underQuoted = true
-				if selfQuoted = continuousBacktick > 0; selfQuoted {
-					continuousBacktick -= 1
-				}
-			}
+	//for _, v := range []byte(str) {
+	//	switch v {
+	//	case '`':
+	//		continuousBacktick++
+	//		if continuousBacktick == 2 {
+	//			writer.WriteString("``")
+	//			continuousBacktick = 0
+	//		}
+	//	case '.':
+	//		if continuousBacktick > 0 || !selfQuoted {
+	//			shiftDelimiter = 0
+	//			underQuoted = false
+	//			continuousBacktick = 0
+	//			writer.WriteByte('`')
+	//		}
+	//		writer.WriteByte(v)
+	//		continue
+	//	default:
+	//		if shiftDelimiter-continuousBacktick <= 0 && !underQuoted {
+	//			writer.WriteByte('`')
+	//			underQuoted = true
+	//			if selfQuoted = continuousBacktick > 0; selfQuoted {
+	//				continuousBacktick -= 1
+	//			}
+	//		}
 
-			for ; continuousBacktick > 0; continuousBacktick -= 1 {
-				writer.WriteString("``")
-			}
+	//		for ; continuousBacktick > 0; continuousBacktick -= 1 {
+	//			writer.WriteString("``")
+	//		}
 
-			writer.WriteByte(v)
-		}
-		shiftDelimiter++
-	}
+	//		writer.WriteByte(v)
+	//	}
+	//	shiftDelimiter++
+	//}
 
-	if continuousBacktick > 0 && !selfQuoted {
-		writer.WriteString("``")
-	}
-	writer.WriteByte('`')
+	//if continuousBacktick > 0 && !selfQuoted {
+	//	writer.WriteString("``")
+	//}
+	//writer.WriteByte('`')
 }
 
 type localTimeInterface interface {
 	In(loc *time.Location) time.Time
 }
 
+// Explain 格式化SQL解释输出
+// 参数：
+//   - sql: SQL语句
+//   - vars: SQL参数
+//
+// 返回：
+//   - 格式化后的SQL字符串
 func (dialector Dialector) Explain(sql string, vars ...interface{}) string {
-	if dialector.DSNConfig != nil && dialector.DSNConfig.Loc != nil {
-		for i, v := range vars {
-			if p, ok := v.(localTimeInterface); ok {
-				func(i int, t localTimeInterface) {
-					defer func() {
-						recover()
-					}()
-					vars[i] = t.In(dialector.DSNConfig.Loc)
-				}(i, p)
-			}
-		}
-	}
+	//if dialector.DSNConfig != nil && dialector.DSNConfig.Loc != nil {
+	//	for i, v := range vars {
+	//		if p, ok := v.(localTimeInterface); ok {
+	//			func(i int, t localTimeInterface) {
+	//				defer func() {
+	//					recover()
+	//				}()
+	//				vars[i] = t.In(dialector.DSNConfig.Loc)
+	//			}(i, p)
+	//		}
+	//	}
+	//}
 	return logger.ExplainSQL(sql, nil, `'`, vars...)
 }
 
+// DataTypeOf 将GORM字段类型映射为DB2数据类型
+// 参数：
+//   - field: 字段schema信息
+//
+// 返回：
+//   - DB2数据类型字符串
 func (dialector Dialector) DataTypeOf(field *schema.Field) string {
 	switch field.DataType {
 	case schema.Bool:
@@ -503,10 +584,24 @@ func (dialector Dialector) getSchemaCustomType(field *schema.Field) string {
 	return sqlType
 }
 
+// SavePoint 创建事务保存点
+// 参数：
+//   - tx: GORM事务实例
+//   - name: 保存点名称
+//
+// 返回：
+//   - 错误信息
 func (dialector Dialector) SavePoint(tx *gorm.DB, name string) error {
 	return tx.Exec("SAVEPOINT " + name).Error
 }
 
+// RollbackTo 回滚到指定保存点
+// 参数：
+//   - tx: GORM事务实例
+//   - name: 保存点名称
+//
+// 返回：
+//   - 错误信息
 func (dialector Dialector) RollbackTo(tx *gorm.DB, name string) error {
 	return tx.Exec("ROLLBACK TO SAVEPOINT " + name).Error
 }
