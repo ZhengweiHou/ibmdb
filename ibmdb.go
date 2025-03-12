@@ -272,7 +272,8 @@ func (dialector Dialector) ClauseBuilders() map[string]clause.ClauseBuilder {
 			}
 			if limit.Limit != nil && *limit.Limit >= 0 {
 				builder.WriteString("FETCH FIRST ")
-				builder.AddVar(builder, *limit.Limit)
+				builder.WriteString(strconv.Itoa(*limit.Limit)) // windows驱动无法解析 FETCH FIRST ? ROWS ONLY 中的占位符，所以直接拼接上
+				// builder.AddVar(builder, *limit.Limit)
 				builder.WriteString(" ROWS ONLY")
 			}
 			// db2 does not support OFFSET without LIMIT
@@ -417,7 +418,7 @@ func (dialector Dialector) Explain(sql string, vars ...interface{}) string {
 	return logger.ExplainSQL(sql, nil, `'`, vars...)
 }
 
-// DataTypeOf 将GORM字段类型映射为DB2数据类型
+// DataTypeOf 将GORM字段类型映射为DB2数据类型 TODO 未完全实现
 // 参数：
 //   - field: 字段schema信息
 //
