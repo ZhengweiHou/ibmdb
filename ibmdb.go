@@ -61,7 +61,8 @@ var (
 	// CreateClauses create clauses
 	CreateClauses = []string{"INSERT", "VALUES", "ON CONFLICT"}
 	// QueryClauses query clauses
-	QueryClauses = []string{}
+	QueryClauses = []string{"SELECT", "FROM", "WHERE", "GROUP BY", "ORDER BY", "LIMIT", "FOR"}
+	//QueryClauses = []string{}
 	// UpdateClauses update clauses
 	UpdateClauses = []string{"UPDATE", "SET", "WHERE", "ORDER BY", "LIMIT"}
 	// DeleteClauses delete clauses
@@ -163,41 +164,6 @@ func (dialector Dialector) Initialize(db *gorm.DB) (err error) {
 		}
 	}
 
-	//	withReturning := false
-	//	if !dialector.Config.SkipInitializeWithVersion {
-	//		//		err = db.ConnPool.QueryRowContext(context.Background(), "SELECT VERSION()").Scan(&dialector.ServerVersion)
-	//		//		if err != nil {
-	//		//			return err
-	//		//		}
-	//
-	//		if strings.Contains(dialector.ServerVersion, "MariaDB") {
-	//			dialector.Config.DontSupportRenameIndex = true
-	//			dialector.Config.DontSupportRenameColumn = true
-	//			dialector.Config.DontSupportForShareClause = true
-	//			dialector.Config.DontSupportNullAsDefaultValue = true
-	//			withReturning = checkVersion(dialector.ServerVersion, "10.5")
-	//		} else if strings.HasPrefix(dialector.ServerVersion, "5.6.") {
-	//			dialector.Config.DontSupportRenameIndex = true
-	//			dialector.Config.DontSupportRenameColumn = true
-	//			dialector.Config.DontSupportForShareClause = true
-	//			dialector.Config.DontSupportDropConstraint = true
-	//		} else if strings.HasPrefix(dialector.ServerVersion, "5.7.") {
-	//			dialector.Config.DontSupportRenameColumn = true
-	//			dialector.Config.DontSupportForShareClause = true
-	//			dialector.Config.DontSupportDropConstraint = true
-	//		} else if strings.HasPrefix(dialector.ServerVersion, "5.") {
-	//			dialector.Config.DisableDatetimePrecision = true
-	//			dialector.Config.DontSupportRenameIndex = true
-	//			dialector.Config.DontSupportRenameColumn = true
-	//			dialector.Config.DontSupportForShareClause = true
-	//			dialector.Config.DontSupportDropConstraint = true
-	//		}
-	//
-	//		if strings.Contains(dialector.ServerVersion, "TiDB") {
-	//			dialector.Config.DontSupportRenameColumnUnique = true
-	//		}
-	//	}
-
 	// register callbacks
 	callbackConfig := &callbacks.Config{
 		CreateClauses: CreateClauses,
@@ -221,9 +187,9 @@ func (dialector Dialector) Initialize(db *gorm.DB) (err error) {
 	//	}
 
 	callbacks.RegisterDefaultCallbacks(db, callbackConfig)
-	createCallback := db.Callback().Create()
 
 	// 替换create函数实现
+	createCallback := db.Callback().Create()
 	createCallback.Replace("gorm:create", Create(callbackConfig))
 
 	for k, v := range dialector.ClauseBuilders() {
@@ -238,7 +204,8 @@ const (
 	// ClauseValues for clause.ClauseBuilder VALUES key
 	ClauseValues = "VALUES"
 	// ClauseFor for clause.ClauseBuilder FOR key
-	ClauseFor = "FOR"
+	ClauseFor   = "FOR"
+	ClauseLimit = "LIMIT"
 )
 
 // ClauseBuilders 返回SQL子句构建器
@@ -296,6 +263,26 @@ func (dialector Dialector) ClauseBuilders() map[string]clause.ClauseBuilder {
 				return
 			}
 			c.Build(builder)
+		},
+		ClauseLimit: func(c clause.Clause, builder clause.Builder) {
+			limit, ok := c.Expression.(clause.Limit)
+			if !ok {
+				c.Build(builder)
+				return
+			}
+			if limit.Limit != nil && *limit.Limit >= 0 {
+				builder.WriteString("FETCH FIRST ")
+				builder.AddVar(builder, *limit.Limit)
+				builder.WriteString(" ROWS ONLY")
+			}
+			// db2 does not support OFFSET without LIMIT
+			//if limit.Offset > 0 {
+			//	if limit.Limit != nil && *limit.Limit >= 0 {
+			//		builder.WriteByte(' ')
+			//	}
+			//	builder.WriteString("OFFSET ")
+			//	builder.AddVar(builder, limit.Offset)
+			//}
 		},
 	}
 
