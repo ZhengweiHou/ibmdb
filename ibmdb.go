@@ -1,4 +1,4 @@
-// Package ibmdb 实现了GORM与IBM DB2数据库的集成
+// Package ibmdb 实现了GORM与IBM DB2数据库的集成  TODO 基底是来自mysql实现的，功能未完全实现
 // 提供了数据库连接、SQL生成、数据类型映射、事务管理等功能
 // 主要包含以下功能：
 // 1. 数据库连接配置
@@ -53,13 +53,24 @@ type Config struct {
 	DontSupportDropConstraint bool
 }
 
+// ibmdb Dialector实现了gorm.Dialector接口
+//
+//	Name() string
+//	Initialize(*DB) error
+//	Migrator(db *DB) Migrator
+//	DataTypeOf(*schema.Field) string
+//	DefaultValueOf(*schema.Field) clause.Expression
+//	BindVarTo(writer clause.Writer, stmt *Statement, v interface{})
+//	QuoteTo(clause.Writer, string)
+//	Explain(sql string, vars ...interface{}) string
 type Dialector struct {
 	*Config
 }
 
 var (
 	// CreateClauses create clauses
-	CreateClauses = []string{"INSERT", "VALUES", "ON CONFLICT"}
+	//CreateClauses = []string{"INSERT", "VALUES", "ON CONFLICT"}
+	CreateClauses = []string{"RETURNING", "INSERT", "VALUES", "ON CONFLICT"}
 	// QueryClauses query clauses
 	QueryClauses = []string{"SELECT", "FROM", "WHERE", "GROUP BY", "ORDER BY", "LIMIT", "FOR"}
 	//QueryClauses = []string{}
@@ -172,19 +183,19 @@ func (dialector Dialector) Initialize(db *gorm.DB) (err error) {
 		DeleteClauses: DeleteClauses,
 	}
 
-	//	if !dialector.Config.DisableWithReturning && withReturning {
-	//		if !utils.Contains(callbackConfig.CreateClauses, "RETURNING") {
-	//			callbackConfig.CreateClauses = append(callbackConfig.CreateClauses, "RETURNING")
-	//		}
-	//
-	//		if !utils.Contains(callbackConfig.UpdateClauses, "RETURNING") {
-	//			callbackConfig.UpdateClauses = append(callbackConfig.UpdateClauses, "RETURNING")
-	//		}
-	//
-	//		if !utils.Contains(callbackConfig.DeleteClauses, "RETURNING") {
-	//			callbackConfig.DeleteClauses = append(callbackConfig.DeleteClauses, "RETURNING")
-	//		}
+	//if !dialector.Config.DisableWithReturning && withReturning {
+	//	if !utils.Contains(callbackConfig.CreateClauses, "RETURNING") {
+	//		callbackConfig.CreateClauses = append(callbackConfig.CreateClauses, "RETURNING")
 	//	}
+
+	//	if !utils.Contains(callbackConfig.UpdateClauses, "RETURNING") {
+	//		callbackConfig.UpdateClauses = append(callbackConfig.UpdateClauses, "RETURNING")
+	//	}
+
+	//	if !utils.Contains(callbackConfig.DeleteClauses, "RETURNING") {
+	//		callbackConfig.DeleteClauses = append(callbackConfig.DeleteClauses, "RETURNING")
+	//	}
+	//}
 
 	callbacks.RegisterDefaultCallbacks(db, callbackConfig)
 
@@ -204,8 +215,9 @@ const (
 	// ClauseValues for clause.ClauseBuilder VALUES key
 	ClauseValues = "VALUES"
 	// ClauseFor for clause.ClauseBuilder FOR key
-	ClauseFor   = "FOR"
-	ClauseLimit = "LIMIT"
+	ClauseFor       = "FOR"
+	ClauseLimit     = "LIMIT"
+	ClauseReturning = "RETURNING"
 )
 
 // ClauseBuilders 返回SQL子句构建器
@@ -214,48 +226,7 @@ const (
 func (dialector Dialector) ClauseBuilders() map[string]clause.ClauseBuilder {
 	clauseBuilders := map[string]clause.ClauseBuilder{
 		ClauseOnConflict: func(c clause.Clause, builder clause.Builder) {
-			onConflict, ok := c.Expression.(clause.OnConflict)
-			if !ok {
-				c.Build(builder)
-				return
-			}
-
-			builder.WriteString("ON DUPLICATE KEY UPDATE ")
-			if len(onConflict.DoUpdates) == 0 {
-				if s := builder.(*gorm.Statement).Schema; s != nil {
-					var column clause.Column
-					onConflict.DoNothing = false
-
-					if s.PrioritizedPrimaryField != nil {
-						column = clause.Column{Name: s.PrioritizedPrimaryField.DBName}
-					} else if len(s.DBNames) > 0 {
-						column = clause.Column{Name: s.DBNames[0]}
-					}
-
-					if column.Name != "" {
-						onConflict.DoUpdates = []clause.Assignment{{Column: column, Value: column}}
-					}
-
-					builder.(*gorm.Statement).AddClause(onConflict)
-				}
-			}
-
-			for idx, assignment := range onConflict.DoUpdates {
-				if idx > 0 {
-					builder.WriteByte(',')
-				}
-
-				builder.WriteQuoted(assignment.Column)
-				builder.WriteByte('=')
-				if column, ok := assignment.Value.(clause.Column); ok && column.Table == "excluded" {
-					column.Table = ""
-					builder.WriteString("VALUES(")
-					builder.WriteQuoted(column)
-					builder.WriteByte(')')
-				} else {
-					builder.AddVar(builder, assignment.Value)
-				}
-			}
+			// TODO DB2的merge实现
 		},
 		ClauseValues: func(c clause.Clause, builder clause.Builder) {
 			if values, ok := c.Expression.(clause.Values); ok && len(values.Columns) == 0 {
@@ -272,7 +243,7 @@ func (dialector Dialector) ClauseBuilders() map[string]clause.ClauseBuilder {
 			}
 			if limit.Limit != nil && *limit.Limit >= 0 {
 				builder.WriteString("FETCH FIRST ")
-				builder.WriteString(strconv.Itoa(*limit.Limit)) // windows驱动无法解析 FETCH FIRST ? ROWS ONLY 中的占位符，所以直接拼接上
+				builder.WriteString(strconv.Itoa(*limit.Limit)) // windows驱动无法解析 FETCH FIRST ? ROWS ONLY 中的占位符，所以直接拼接上 TODO但会影响sql预编译的性能
 				// builder.AddVar(builder, *limit.Limit)
 				builder.WriteString(" ROWS ONLY")
 			}
@@ -284,6 +255,22 @@ func (dialector Dialector) ClauseBuilders() map[string]clause.ClauseBuilder {
 			//	builder.WriteString("OFFSET ")
 			//	builder.AddVar(builder, limit.Offset)
 			//}
+		},
+		ClauseReturning: func(c clause.Clause, builder clause.Builder) {
+			returning, ok := c.Expression.(clause.Returning)
+			if !ok {
+				return
+			}
+			if len(returning.Columns) > 0 {
+				builder.WriteString("SELECT ")
+				for idx, column := range returning.Columns {
+					if idx > 0 {
+						builder.WriteByte(',')
+					}
+					builder.WriteQuoted(column)
+				}
+				builder.WriteString(" FROM FINAL TABLE (")
+			}
 		},
 	}
 
