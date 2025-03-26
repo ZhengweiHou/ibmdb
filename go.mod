@@ -1,17 +1,21 @@
 module gorm.io/driver/ibmdb
 
-go 1.18
+go 1.22.1
+
+toolchain go1.24.0
 
 replace gorm.io/gorm v1.25.12 => /home/houzw/document/git-rep/golang/gorm
 
 require (
 	github.com/go-sql-driver/mysql v1.8.1
+	github.com/ibmdb/go_ibm_db v0.5.2
 	gorm.io/gorm v1.25.12
 //	gorm.io/gorm v1.25.11
 )
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
+	github.com/ibmruntimes/go-recordio/v2 v2.0.0-20240416213906-ae0ad556db70 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	golang.org/x/text v0.14.0 // indirect

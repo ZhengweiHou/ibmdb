@@ -23,6 +23,8 @@ import (
 	"gorm.io/gorm/logger"
 	"gorm.io/gorm/migrator"
 	"gorm.io/gorm/schema"
+
+	_ "github.com/ibmdb/go_ibm_db"
 )
 
 const (
@@ -227,6 +229,13 @@ func (dialector Dialector) ClauseBuilders() map[string]clause.ClauseBuilder {
 	clauseBuilders := map[string]clause.ClauseBuilder{
 		ClauseOnConflict: func(c clause.Clause, builder clause.Builder) {
 			// TODO DB2的merge实现
+			onConflict, ok := c.Expression.(clause.OnConflict)
+			if !ok {
+				c.Build(builder)
+				return
+			}
+			fmt.Println(onConflict)
+
 		},
 		ClauseValues: func(c clause.Clause, builder clause.Builder) {
 			if values, ok := c.Expression.(clause.Values); ok && len(values.Columns) == 0 {

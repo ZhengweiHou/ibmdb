@@ -47,10 +47,21 @@ func Create(config *callbacks.Config) func(db *gorm.DB) {
 			db.Statement.AddClauseIfNotExists(clause.Insert{})
 			db.Statement.AddClause(callbacks.ConvertToCreateValues(db.Statement))
 
+			//if c, ok := db.Statement.Clauses["ON CONFLICT"]; ok {
+			//  // TODO db2 merge SQL构建待开发
+			//	// 若ON CONFLICT则db2要生成merge语句，其他clause会有干扰，索性就全替换，只由ON CONFLICT clause进行sql拼接
+			//	if onConflict, ok := c.Expression.(clause.OnConflict); ok {
+			//		db.Statement.Clauses = map[string]clause.Clause{
+			//			"ON CONFLICT": clause.Clause{Expression: onConflict},
+			//		}
+			//	}
+			//}
+
 			db.Statement.Build(db.Statement.BuildClauses...)
-		}
-		if supportReturning && len(db.Statement.Schema.FieldsWithDefaultDBValue) > 0 {
-			db.Statement.WriteString(")")
+
+			if supportReturning && len(db.Statement.Schema.FieldsWithDefaultDBValue) > 0 {
+				db.Statement.WriteString(")")
+			}
 		}
 
 		// 检查是否为 DryRun 模式
@@ -75,6 +86,7 @@ func Create(config *callbacks.Config) func(db *gorm.DB) {
 			mode := gorm.ScanUpdate
 			//if c, ok := db.Statement.Clauses["ON CONFLICT"]; ok {
 			//	if onConflict, _ := c.Expression.(clause.OnConflict); onConflict.DoNothing {
+			// // 若OnConflict标示的是不处理的话，则scan时也不处理
 			//		mode |= gorm.ScanOnConflictDoNothing
 			//	}
 			//}
