@@ -1,8 +1,6 @@
 module gorm.io/driver/ibmdb
 
-go 1.22.1
-
-toolchain go1.24.0
+go 1.23.6
 
 replace gorm.io/gorm v1.25.12 => /home/houzw/document/git-rep/golang/gorm
 
