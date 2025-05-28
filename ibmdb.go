@@ -23,8 +23,8 @@ import (
 	"gorm.io/gorm/logger"
 	"gorm.io/gorm/migrator"
 	"gorm.io/gorm/schema"
-
-	_ "github.com/ibmdb/go_ibm_db"
+	// 由使用者自己导入
+	// _ "github.com/ibmdb/go_ibm_db"
 )
 
 const (
